@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dotnet build *)",
+      "Bash(mkdir -p Genders/Queries Countries/Queries States/Queries Cities/Queries Skills/Queries)",
+      "Bash(mv Lookups/Queries/GetAllGendersQuery.cs Genders/Queries/)",
+      "Bash(mv Lookups/Queries/GetAllGendersQueryHandler.cs Genders/Queries/)",
+      "Bash(mv Lookups/Queries/GetAllCountriesQuery.cs Countries/Queries/)",
+      "Bash(mv Lookups/Queries/GetAllCountriesQueryHandler.cs Countries/Queries/)",
+      "Bash(sed -i 's/namespace Application\\\\.Forca\\\\.UseCases\\\\.Lookups\\\\.Queries/namespace Application.Forca.UseCases.Genders.Queries/' Genders/Queries/*.cs)",
+      "Bash(sed -i 's/namespace Application\\\\.Forca\\\\.UseCases\\\\.Lookups\\\\.Queries/namespace Application.Forca.UseCases.Countries.Queries/' Countries/Queries/*.cs)",
+      "Bash(sed -i 's/namespace Application\\\\.Forca\\\\.UseCases\\\\.Lookups\\\\.Queries/namespace Application.Forca.UseCases.States.Queries/' States/Queries/*.cs)",
+      "Bash(sed -i 's/namespace Application\\\\.Forca\\\\.UseCases\\\\.Lookups\\\\.Queries/namespace Application.Forca.UseCases.Cities.Queries/' Cities/Queries/*.cs)",
+      "Bash(sed -i 's/namespace Application\\\\.Forca\\\\.UseCases\\\\.Lookups\\\\.Queries/namespace Application.Forca.UseCases.Skills.Queries/' Skills/Queries/*.cs)"
+    ]
+  }
+}

@@ -1,0 +1,159 @@
+# Pedidos de exemplo para a API de clientes e fornecedores.
+#
+# Funciona no Visual Studio 2022 (17.12+), Rider e na extensão REST Client do VS Code.
+# Os pedidos com "# @name" guardam a resposta; os seguintes reutilizam o Id e a Version com
+# {{nomeDoPedido.response.body.$.id}} e {{nomeDoPedido.response.body.$.version}}.
+# Se o seu cliente HTTP não suportar variáveis de resposta: copie o "id" e a "version" do corpo
+# da resposta anterior e cole-os no URL / no campo "version" do pedido seguinte.
+#
+# Executar pela ordem em que aparecem. Os NIF abaixo não existem nos dados de demonstração.
+
+@baseUrl = http://localhost:5268
+
+### 1. Criar CUSTOMER (nome com espaços e NIF com pontos — são normalizados)
+# @name createCustomer
+POST {{baseUrl}}/api/partners
+Content-Type: application/json
+
+{
+  "name": "  Joana Matos  ",
+  "taxNumber": "910.000.001",
+  "type": "CUSTOMER",
+  "email": "joana.matos@example.com",
+  "creditLimit": 1500.50
+}
+
+### 2. Criar SUPPLIER (NIF com espaços, sem email)
+# @name createSupplier
+POST {{baseUrl}}/api/partners
+Content-Type: application/json
+
+{
+  "name": "Fornecedora Kalandula",
+  "taxNumber": "910 000 002",
+  "type": "SUPPLIER",
+  "email": null,
+  "creditLimit": 50000
+}
+
+### 3. Criar BOTH (NIF com hífenes)
+# @name createBoth
+POST {{baseUrl}}/api/partners
+Content-Type: application/json
+
+{
+  "name": "Comercial Namibe",
+  "taxNumber": "910-000-003",
+  "type": "BOTH",
+  "email": "geral@namibe.example.com",
+  "creditLimit": 250000
+}
+
+### 4. Consultar por Id
+GET {{baseUrl}}/api/partners/{{createCustomer.response.body.$.id}}
+Accept: application/json
+
+### 5. Listar com paginação
+GET {{baseUrl}}/api/partners?Page=1&PageSize=5
+Accept: application/json
+
+### 6. Filtrar por Type (CUSTOMER inclui BOTH; SUPPLIER inclui BOTH; BOTH só BOTH)
+GET {{baseUrl}}/api/partners?Type=CUSTOMER
+Accept: application/json
+
+### 7. Pesquisar por nome (parcial, sem distinguir maiúsculas: "ana" encontra "Ana Silva" e "Mariana")
+GET {{baseUrl}}/api/partners?Search=ana
+Accept: application/json
+
+### 8. Pesquisar por NIF (separadores são ignorados; também aceita parte do NIF)
+GET {{baseUrl}}/api/partners?Search=910.000.002
+Accept: application/json
+
+### 9. Incluir inactivos
+GET {{baseUrl}}/api/partners?IncludeInactive=true&PageSize=100
+Accept: application/json
+
+### 10. Actualizar usando a Version recebida (todos os campos são obrigatórios; email pode ser null)
+# @name updateCustomer
+PUT {{baseUrl}}/api/partners/{{createCustomer.response.body.$.id}}
+Content-Type: application/json
+
+{
+  "name": "Joana Matos Lda",
+  "taxNumber": "910000001",
+  "type": "BOTH",
+  "email": null,
+  "creditLimit": 2000,
+  "isActive": true,
+  "version": "{{createCustomer.response.body.$.version}}"
+}
+
+### 11a. Desactivar (usa a Version devolvida pelo pedido 10)
+# @name deactivateCustomer
+PUT {{baseUrl}}/api/partners/{{createCustomer.response.body.$.id}}
+Content-Type: application/json
+
+{
+  "name": "Joana Matos Lda",
+  "taxNumber": "910000001",
+  "type": "BOTH",
+  "email": null,
+  "creditLimit": 2000,
+  "isActive": false,
+  "version": "{{updateCustomer.response.body.$.version}}"
+}
+
+### 11b. Reactivar (usa a Version devolvida pelo pedido 11a)
+PUT {{baseUrl}}/api/partners/{{createCustomer.response.body.$.id}}
+Content-Type: application/json
+
+{
+  "name": "Joana Matos Lda",
+  "taxNumber": "910000001",
+  "type": "BOTH",
+  "email": null,
+  "creditLimit": 2000,
+  "isActive": true,
+  "version": "{{deactivateCustomer.response.body.$.version}}"
+}
+
+### 12. NIF duplicado → 409 Conflict (mesmo NIF do pedido 1, escrito de outra forma)
+POST {{baseUrl}}/api/partners
+Content-Type: application/json
+
+{
+  "name": "Outra Joana",
+  "taxNumber": "910 000 001",
+  "type": "CUSTOMER",
+  "creditLimit": 0
+}
+
+### 13. Version desactualizada → 409 Conflict
+# Reutiliza a Version devolvida na criação (pedido 1), que já foi substituída pelos pedidos 10 e 11.
+PUT {{baseUrl}}/api/partners/{{createCustomer.response.body.$.id}}
+Content-Type: application/json
+
+{
+  "name": "Escrita com versão antiga",
+  "taxNumber": "910000001",
+  "type": "CUSTOMER",
+  "email": null,
+  "creditLimit": 0,
+  "isActive": true,
+  "version": "{{createCustomer.response.body.$.version}}"
+}
+
+### 14. Dados inválidos → 400 (CreditLimit com 3 casas decimais e Type desconhecido)
+POST {{baseUrl}}/api/partners
+Content-Type: application/json
+
+{
+  "name": "Teste",
+  "taxNumber": "910000099",
+  "type": "PARTNER",
+  "creditLimit": 10.999
+}
+
+### 15. Id inexistente → 404
+GET {{baseUrl}}/api/partners/00000000-0000-0000-0000-000000000000
+Accept: application/json
