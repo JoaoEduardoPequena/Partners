@@ -190,6 +190,104 @@ Cada teste cria uma base de dados nova (`partners_test_<guid>`) com a migração
 (cada um com o seu scope, `DbContext` e ligação) e também dois `DbContext` independentes com
 transacções sobrepostas, para provar que o bloqueio e a falha acontecem no SQL Server.
 
+### O que é testado
+
+| Projecto | O que testa | Base de dados |
+|---|---|---|
+| `Partners.UnitTests` | Regras isoladas (normalização, validadores, token de versão, contratos JSON) | Não |
+| `Partners.IntegrationTests` | Os 4 endpoints via HTTP, com a API em memória (`WebApplicationFactory`) | SQL Server real |
+
+#### Partners.UnitTests
+
+Testes rápidos, sem API nem base de dados. Chamam directamente as classes da camada Application.
+
+- **`PartnerNormalizerTests`** — normalização e formatos:
+  - NIF: `001.234.567`, `001 234 567`, `001-234-567` e combinações → `001234567`;
+    rejeita 8 ou 10 dígitos, letras, outros separadores (`/`) e dígitos Unicode não ASCII.
+  - Nome: aplica `Trim`.
+  - Email: vazio ou só espaços → `null`; caso contrário `Trim`; formatos válidos e inválidos
+    (`ana@`, `ana@example`, `ana@@example.com`, espaços, `..`).
+  - Type: aceita só `CUSTOMER`, `SUPPLIER`, `BOTH` exactos; rejeita minúsculas, espaços,
+    números, listas e `null`.
+- **`PartnerValidatorTests`** — validadores FluentValidation:
+  - Criação: nome obrigatório, 2 a 100 caracteres depois de `Trim`, sem caracteres de controlo;
+    NIF inválido; Type inválido; email inválido; email ausente ou em branco aceite;
+    CreditLimit `10.999`, `-0.01` e `1000000.01` rejeitados; `0`, `10.99`, `10.990` e `1000000` aceites.
+  - Actualização: comando válido aceite; `Version` em falta, vazia, não Base64 ou com tamanho errado → erro.
+  - Listagem: `Page` < 1 e `PageSize` fora de 1–100 rejeitados; Type inválido rejeitado;
+    valores por defeito (`Page=1`, `PageSize=20`, `IncludeInactive=false`) válidos.
+- **`VersionTokenTests`** — `Version` (rowversion ↔ Base64):
+  - Codificar e descodificar devolve os mesmos 8 bytes (`AAAAAAAAB9E=`).
+  - Rejeita `null`, vazio, só espaços, texto não Base64, e Base64 com 3 ou 10 bytes.
+- **`ContractSerializationTests`** — contrato JSON:
+  - PUT aceita `email: null` explícito, mas rejeita o pedido se faltar `email`, `version`,
+    `isActive`, `creditLimit` ou `name`.
+  - POST: `email` é opcional, `creditLimit` é obrigatório.
+  - A resposta (`PartnerDto`) serializa em camelCase, com o NIF como texto e as datas em UTC (`Z`).
+
+#### Partners.IntegrationTests
+
+Cada teste arranca a API em memória, faz pedidos HTTP reais e confirma o resultado também
+directamente na base de dados (com um `DbContext` ou `SqlConnection` independente da API).
+
+- **`TaxNumberAndUpdateTests`** — NIF, actualização e 404:
+  - Criar com `" Ana Silva "` e `"001.234.567"` grava `"Ana Silva"` e `"001234567"` (coluna
+    `varchar`, zero à esquerda preservado); `"001 234 567"` → 409; o NIF continua reservado
+    depois de desactivar.
+  - Desactivar sai da listagem por defeito, aparece com `IncludeInactive=true`, continua
+    acessível por Id; reactivar devolve-a à listagem.
+  - Manter o próprio NIF é permitido; mudar para o NIF de outra entidade → 409 sem alterar dados.
+  - `CreatedAt` não muda, `UpdatedAt` e `Version` mudam; Id e datas enviados pelo cliente são ignorados.
+  - `Version` desactualizada → 409, mantendo os dados mais recentes.
+  - POST devolve 201 com `Location` que aponta para o GET; ignora `id`, `isActive`, datas e `version` do cliente.
+  - GET e PUT com Id inexistente → 404.
+  - PUT exige `email` presente (pode ser `null`) e `version` presente → 400 caso contrário.
+- **`ListingTests`** — listagem:
+  - `Type=CUSTOMER` e `Type=SUPPLIER` incluem `BOTH`; `Type=BOTH` só `BOTH`.
+  - Pesquisa por nome parcial, sem distinguir maiúsculas; `Search=Ana` não faz corresponder
+    todos os NIF.
+  - Pesquisa por NIF com ou sem separadores, e por parte do NIF; `...` ou `- -` não devolvem tudo;
+    `%` e `_` são tratados literalmente.
+  - Filtros combinados com AND (pesquisa + tipo + inactivos).
+  - `TotalCount` é contado antes da paginação; página além do fim devolve `Items` vazio com
+    `TotalCount` correcto; defeitos `Page=1`, `PageSize=20`.
+  - Nomes iguais são desempatados por Id, também entre páginas.
+  - `IncludeInactive` é `false` por defeito.
+- **`ConcurrencyTests`** — concorrência no SQL Server:
+  - Dois POST simultâneos com o mesmo NIF (escrito de formas diferentes) → um 201 e um 409, e um
+    único registo (repetido 5 vezes).
+  - Dois PUT simultâneos com a mesma `Version` → um 200 e um 409; o estado final é exactamente o
+    da escrita confirmada (repetido 5 vezes).
+  - Dois `DbContext` independentes com transacções sobrepostas: o segundo INSERT fica bloqueado
+    pelo SQL Server e depois falha pelo índice único; o segundo UPDATE falha pelo `rowversion`.
+- **`ValidationTests`** — erros 400 sem alterações:
+  - POST inválido (CreditLimit `10.999`, negativo ou acima do limite, NIF com letras ou 10 dígitos,
+    Type inválido, nome vazio ou curto, email inválido, JSON com tipos errados) → 400 e nada gravado.
+  - PUT inválido (incluindo `Version` malformada) → 400 e o registo fica igual.
+  - Id malformado no URL (`GET`/`PUT /api/partners/not-a-guid`) → 400 e nada alterado.
+  - Listagem com `Page=0`, `PageSize` 0 ou 101, Type inválido, valores não numéricos → 400;
+    valores-limite aceites.
+  - Mensagens de erro em português (validação, JSON malformado, corpo vazio, 404 e 409), em
+    `application/problem+json`.
+  - `CreditLimit` com 2 casas decimais é gravado sem arredondamento.
+- **`Infrastructure/SqlServerFixture`** — arranca um SQL Server por execução de testes (container
+  Docker via Testcontainers, ou o servidor indicado em `INTEGRATION_TESTS_SQLSERVER`).
+- **`Infrastructure/PartnersApiTestBase`** — classe base: cria uma base de dados nova por teste
+  (com a migração real), arranca a API ligada a ela, apaga-a no fim e disponibiliza os métodos
+  auxiliares (`CreateAsync`, `GetAsync`, `UpdateAsync`, `ListAsync`, `CreateDbContext`, ...).
+
+#### Cenários do enunciado
+
+| Cenário | Testes |
+|---|---|
+| 1. Normalização do nome e NIF; NIF duplicado → 409; reservado após desactivação | `TaxNumberAndUpdateTests.Create_NormalizesNameAndTaxNumber_AndKeepsTaxNumberReservedWhenInactive` |
+| 2. `BOTH` aparece em CUSTOMER, SUPPLIER e BOTH; CUSTOMER não aparece em SUPPLIER | `ListingTests.TypeFilter_CustomerAndSupplierIncludeBoth_BothIsExclusive` |
+| 3. Desactivar e reactivar por PUT | `TaxNumberAndUpdateTests.DeactivateAndReactivate_ControlsDefaultListing` |
+| 4. Manter o próprio NIF; NIF de outra entidade → 409 sem alterar dados | `TaxNumberAndUpdateTests.Update_KeepsOwnTaxNumber_ButRejectsTaxNumberOfAnotherPartner` |
+| 5. Criações e actualizações simultâneas; contextos independentes | `ConcurrencyTests` (todos) |
+| 6. CreditLimit `10,999`, NIF com letras, `Page=0`, Type inválido, Version malformada → 400 sem alterações | `ValidationTests.Post_InvalidData_Returns400_AndWritesNothing`, `Put_InvalidData_Returns400_AndLeavesRowUnchanged`, `List_InvalidParameters_Returns400` |
+| 7. Filtros combinados, `TotalCount` antes da paginação, desempate por Id, `Search=Ana` | `ListingTests.Filters_AreCombinedWithAnd`, `Paging_TotalCountIsBeforePaging_AndPageBeyondEndIsEmpty`, `Ordering_SameNames_AreTieBrokenById`, `Search_ByName_IsPartialAndCaseInsensitive_AndDoesNotMatchEveryTaxNumber` |
+
 ## Endpoints
 
 | Método | Rota | Sucesso | Erros |

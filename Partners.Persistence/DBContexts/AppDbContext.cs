@@ -17,5 +17,10 @@ namespace Partners.Persistence.DBContexts
                 typeof(AppDbContext).Assembly);
             base.OnModelCreating(modelBuilder);
         }
+        /*protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+        {
+            var con = "Data Source=IP;Initial Catalog=Partners;Integrated Security=False;user id=user;password=senha;MultipleActiveResultSets=true;TrustServerCertificate=True";
+            optionsBuilder.UseSqlServer(con);
+        }*/
     }
 }
